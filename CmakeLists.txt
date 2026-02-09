@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(lab1 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_executable(lab1
+    main.cpp
+)
+
+target_sources(lab1
+    PRIVATE
+        src/relations.cpp
+        src/Logger.cpp
+        src/LPproblem.cpp
+        src/problemForm.cpp
+        src/simplex.cpp
+)
+
+target_include_directories(lab1
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+)
+
+configure_file(
+    ${CMAKE_SOURCE_DIR}/data.txt
+    ${CMAKE_CURRENT_BINARY_DIR}/data.txt
+    COPYONLY
+)
