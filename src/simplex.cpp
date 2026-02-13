@@ -19,6 +19,13 @@ void runSimplex(LPproblem problem){
         }
     }
 
+    // max(f) = min(-f)
+    if(!problem.targetFunc.minimaze){
+        for(auto& el: problem.targetFunc.coefs){
+            el *= -1;
+        }
+    }
+
     // Для удобства создадим симлекс матрицу
     // | A | I (искусственные) | b |
     size_t nVars = problem.constraints[0].coefs.size(); // число исходных переменных
@@ -61,18 +68,42 @@ void runSimplex(LPproblem problem){
         std::cout << "=== Phase I iter " << iter << " ===\n";
         std::cout << std::setw(6) << "bas";
         for (size_t j = 0; j < cols - 1; ++j) std::cout << std::setw(8) << ("x" + std::to_string(j+1));
-        std::cout << std::setw(10) << "RHS\n";
+        std::cout << std::setw(10) << "RHS" << std::setw(12) << "resid\n";
+
+        // Печатаем таблицу (включая RHS)
         for (size_t i = 0; i < nCons; ++i) {
             std::cout << std::setw(6) << ("x" + std::to_string(basis[i]+1));
             for (size_t j = 0; j < cols; ++j) std::cout << std::setw(8) << std::setprecision(6) << mat[i][j];
+            // временно оставим перенос строки, невязку посчитаем ниже
             std::cout << "\n";
         }
         std::cout << std::setw(6) << "Δ";
         for (size_t j = 0; j < cols; ++j) std::cout << std::setw(8) << std::setprecision(6) << mat[rows-1][j];
-        std::cout << "\n\n";
+        std::cout << "\n";
+
+        // --- Вычислим текущий базисный вектор x (для исходных nVars переменных) ---
+        std::vector<double> cur_x(nVars, 0.0);
+        for (size_t i = 0; i < nCons; ++i) {
+            if (basis[i] < nVars) {
+                cur_x[basis[i]] = mat[i][cols - 1];
+            }
+        }
+
+        // --- Вычислим невязки для каждого ограничения: residual = A*x - b ---
+        double max_abs_resid = 0.0;
+        std::cout << "Residuals (A*x - b) per constraint:\n";
+        for (size_t i = 0; i < nCons; ++i) {
+            double lhs = 0.0;
+            for (size_t j = 0; j < nVars; ++j) lhs += problem.constraints[i].coefs[j] * cur_x[j];
+            double resid = lhs - problem.constraints[i].rhs;
+            max_abs_resid = std::max(max_abs_resid, std::fabs(resid));
+            std::cout << " row " << (i+1) << ": resid = " << std::setprecision(8) << resid
+                      << "   (LHS=" << lhs << " RHS=" << problem.constraints[i].rhs << ")\n";
+        }
+        std::cout << " max |resid| = " << std::setprecision(8) << max_abs_resid << "\n\n";
     };
     printTable(0);
-    
+
     // Основной цикл Phase I
     const int MAX_ITERS = 10000;
     int iter = 0;
@@ -91,10 +122,9 @@ void runSimplex(LPproblem problem){
         }
         if(enterIdx == cols){
             // все Δ >= 0 => оптимум Phase I
-            //printTable(iter);
+            printTable(iter);
             break;
         }
-
         // 2) Ratio test — выбираем строку с минимальным положительным отношением b_i / a_i,enter
         double minRel = std::numeric_limits<double>::infinity();
         size_t leaveRow = rows; // признак "не найден"
@@ -102,224 +132,226 @@ void runSimplex(LPproblem problem){
             double a = mat[i][enterIdx];
             if(a > EPS){ // Только позитивные коэффициенты допустимы
                 double rel = mat[i][cols - 1] / a;
-                // Вырождение: если rel == minRel — выбираем меньший индекс строки (Bland-like)
-                if(rel + EPS < minRel || (std::abs(rel - minRel) <= EPS && i < leaveRow)){
+                if (rel < minRel - EPS) {
                     minRel = rel;
                     leaveRow = i;
                 }
             }
         }
-
-        if(leaveRow == rows){
-            // Нет положительных элементов в выбранном столбце => направление убывания целевой неограничено.
-            // В Phase I это означает, что W можно уменьшать без ограничения — на практике это сигнал о проблеме построения,
-            // но корректно — бросить понятное исключение.
-            throw std::runtime_error("runSimplex: no positive entries in entering column -> unbounded direction (Phase I)");
+        if (leaveRow == rows) {
+            throw std::runtime_error("Ошибка: целевая функция не ограничена снизу");
         }
 
-        // 3) Pivot: нормализация ведущей строки и обнуление столбца
-        double pivot = mat[leaveRow][enterIdx];
-        if(std::abs(pivot) < EPS) throw std::runtime_error("runSimplex: pivot ~= 0 (numerical issue)");
+        // 3) Пересчет симплекс-таблицы (Метод Гаусса-Жордана)
+        basis[leaveRow] = enterIdx;
+        double pivotVal = mat[leaveRow][enterIdx];
 
-        // нормализуем ведущую строку
-        for(size_t j = 0; j < cols; ++j){
-            mat[leaveRow][j] /= pivot;
-        }
+        // Нормализация ведущей строки
+        for (size_t j = 0; j < cols; ++j) mat[leaveRow][j] /= pivotVal;
 
-        // обнуляем столбец enterIdx во всех остальных строках (включая строку Δ)
-        for(size_t i = 0; i < rows; ++i){
-            if(i == leaveRow) continue;
-            double factor = mat[i][enterIdx];
-            if(std::abs(factor) <= EPS) continue;
-            for(size_t j = 0; j < cols; ++j){
-                mat[i][j] -= factor * mat[leaveRow][j];
-                // числовая чистка
-                if(std::abs(mat[i][j]) < EPS) mat[i][j] = 0.0;
+        // Исключение переменной из остальных строк (включая строку оценок)
+        for (size_t i = 0; i < rows; ++i) {
+            if (i != leaveRow) {
+                double factor = mat[i][enterIdx];
+                for (size_t j = 0; j < cols; ++j) {
+                    mat[i][j] -= factor * mat[leaveRow][j];
+                }
             }
         }
 
-        // 4) Обновление базиса
-        basis[leaveRow] = enterIdx;
-
-        // Опционально: вывод после pivot
-        //printTable(iter);
+        // Печатаем таблицу и невязки после pivot'а
+        printTable(iter);
     }
+  // Конец цикла Phase I
 
-    // Phase I завершён — проверяем W (сумма искусственных). Надёжнее считать сумму значений искусственных переменных:
+    // --- Анализ результатов Phase I ---
+    // Вспомогательная функция минимизировала сумму искусственных переменных. 
+    // Согласно источникам, если минимум > 0, исходная задача не имеет допустимых решений [1].
+    // Текущее значение функции (сумма y_i) находится в mat[rows-1][cols-1] (с инверсией знака).
+    const double W_EPS = 1e-8; // можно увеличить до 1e-7 при численной нестабильности
     double W = 0.0;
-    for(size_t i = 0; i < nCons; ++i){
+    for (size_t i = 0; i < nCons; ++i) {
         size_t col = basis[i];
-        if(col >= nVars && col < nVars + nCons){ // если базисная переменная — искусственная
-            W += mat[i][cols - 1]; // её значение = b_i
+        // искусственные столбцы имеют индексы от nVars до nVars + nCons - 1
+        if (col >= nVars && col < nVars + nCons) {
+            // значение переменной = RHS этой строки
+            W += mat[i][cols - 1];
         }
     }
-    // также можно проверить через последнюю ячейку строки Δ: mat[rows-1][cols-1] = -sum(rows) по инициализации,
-    // но при pivot-ах явное суммирование базисных искусственных безопаснее.
-
-    if(std::abs(W) > 1e-8){
-        // нет допустимого решения
-        throw std::runtime_error("runSimplex: Phase I failed, problem infeasible (W > 0).");
+    if (W > W_EPS) {
+        std::cout << "Задача не имеет допустимых решений (Phase I: W = " << W << " > " << W_EPS << ").\n";
+        // диагностическая печать полезна при отладке:
+        std::cerr << "DEBUG: basis and RHS after Phase I:\n";
+        for (size_t i = 0; i < nCons; ++i) {
+            std::cerr << " row " << i << " basis x" << basis[i]+1 << " = " << mat[i][cols - 1] << "\n";
+        }
+        // при желании — вывести всю таблицу
+        return;
     }
 
-    std::cout << "runSimplex: Phase I completed successfully (W == 0). Base variables:\n";
-    for(size_t i = 0; i < nCons; ++i){
-        std::cout << " row " << i << " -> var x" << (basis[i] + 1) << " = " << mat[i][cols - 1] << "\n";
-    }
-
-    // Phase II
-
-    // ---------- НОВЫЙ БЛОК: выталкиваем искусственные из базиса перед удалением столбцов ----------
-    // Для каждой строки, где в базисе искусственная переменная (basis[i] >= nVars),
-    // пытаемся найти ненулевой столбец в зоне реальных переменных (0..nVars-1) и сделать pivot.
+    // --- Переход к Phase II ---
+    
+    // СМЕНА БАЗИСА (Вытеснение искусственных переменных) [1, 2]
+    // Если Фаза I завершилась успехом (L=0), но в базисе остались искусственные переменные 
+    // (их значения в mat[i][cols-1] равны 0), их нужно заменить на реальные переменные.
     for (size_t i = 0; i < nCons; ++i) {
-        size_t bj = basis[i];
-        if (bj >= nVars && bj < nVars + nCons) {
-            // искусственная в базисе — пробуем заменить
+        if (basis[i] >= nVars) { // Индекс искусственной переменной
             bool replaced = false;
             for (size_t j = 0; j < nVars; ++j) {
+                // Ищем в этой строке ненулевой элемент для реальной переменной [2]
                 if (std::abs(mat[i][j]) > EPS) {
-                    // Сделаем pivot в (i, j) — аналогично циклу pivot'а
-                    double pv = mat[i][j];
-                    // Нормализуем строку i
-                    for (size_t col = 0; col < cols; ++col) mat[i][col] /= pv;
-                    // Обнуляем столбец j во всех остальных строках
-                    for (size_t r = 0; r < rows; ++r) {
-                        if (r == i) continue;
-                        double factor = mat[r][j];
-                        if (std::abs(factor) <= EPS) continue;
-                        for (size_t col = 0; col < cols; ++col) {
-                            mat[r][col] -= factor * mat[i][col];
-                            if (std::abs(mat[r][col]) < EPS) mat[r][col] = 0.0;
+                    // Выполняем Pivot (шаг Жордана-Гаусса) для замены базиса [5]
+                    double pivotVal = mat[i][j];
+                    for (size_t k = 0; k < cols; ++k) mat[i][k] /= pivotVal;
+                    for (size_t k = 0; k < rows; ++k) {
+                        if (k != i) {
+                            double factor = mat[k][j];
+                            for (size_t l = 0; l < cols; ++l) mat[k][l] -= factor * mat[i][l];
                         }
                     }
-                    // обновляем базис
                     basis[i] = j;
                     replaced = true;
                     break;
                 }
             }
-            if (!replaced) {
-                // Не нашли ненулевой столбец в реальной части.
-                // Если RHS ~= 0, строка линейно зависима — допустимо (оставим строку как есть).
-                // Если RHS != 0 — это означает, что Phase I дал корявый результат (редко),
-                // и корректнее сообщить об ошибке.
-                if (std::abs(mat[i][cols - 1]) > 1e-8) {
-                    throw std::runtime_error("runSimplex: cannot remove artificial from basis, inconsistent row after Phase I");
-                } else {
-                    // строка нулевая, искусственная остается, но её значение 0 (можно удалить столбец позже)
-                    // Для отладки — можно напечатать предупреждение:
-                    std::cerr << "runSimplex: warning — artificial remains in basis for row " << i
-                              << " but RHS == 0; row is dependent and will be ignored.\n";
-                }
+            // Если replaced == false, значит строка i полностью нулевая для реальных переменных.
+            // Согласно [2], это означает, что данное ограничение является лишним (линейно зависимым).
+        }
+    }
+
+    // 2. Формируем новую строку оценок для исходной функции цели f(x) = c*x
+    // Теперь все basis[i] гарантированно < nVars (если задача не имела лишних ограничений)
+    for (size_t j = 0; j < nVars; ++j) {
+        double z_j = 0.0;
+        for (size_t i = 0; i < nCons; ++i) {
+            z_j += problem.targetFunc.coefs[basis[i]] * mat[i][j];
+        }
+        mat[rows-1][j] = problem.targetFunc.coefs[j] - z_j;
+    }
+
+    // Считаем текущее значение f(x)
+    double current_f = 0.0;
+    for (size_t i = 0; i < nCons; ++i) {
+        current_f += problem.targetFunc.coefs[basis[i]] * mat[i][cols-1];
+    }
+    mat[rows-1][cols-1] = current_f;
+
+    // --- Итерации Phase II ---
+    int iter2 = 0;
+    while (true) {
+        ++iter2;
+        // 1) Выбор входящего столбца
+        size_t enterIdx = cols;
+        double minDelta = -EPS;
+        for (size_t j = 0; j < nVars; ++j) {
+            if (mat[rows - 1][j] < minDelta) {
+                minDelta = mat[rows - 1][j];
+                enterIdx = j;
             }
         }
-    }
-    // ---------- конец блока вытолкования искусственных ----------
 
-    // Удаляем столбцы искусственных переменных
-    size_t newCols = nVars + 1; // только x и RHS
-    std::vector<std::vector<double>> mat2(rows, std::vector<double>(newCols, 0.0));
+        if (enterIdx == cols) break; // Оптимум найден [6]
 
-    for(size_t i = 0; i < rows; ++i){
-        for(size_t j = 0; j < nVars; ++j){
-            mat2[i][j] = mat[i][j];
-        }
-        mat2[i][newCols - 1] = mat[i][cols - 1]; // RHS
-    }
+        // 2) Ratio test
+        double minRatio = std::numeric_limits<double>::infinity();
+        size_t leaveRow = rows;
 
-    mat.swap(mat2);
-    cols = newCols;
-
-    // Обнуляем строку оценок
-    for(size_t j = 0; j < cols; ++j)
-        mat[rows-1][j] = 0.0;
-
-    // Записываем c_j
-    for(size_t j = 0; j < nVars; ++j){
-        mat[rows-1][j] = problem.targetFunc.coefs[j];
-    }
-
-    // Корректируем по базису: Δ = c - c_B * A
-    for(size_t i = 0; i < nCons; ++i){
-        size_t bj = basis[i];
-        double cB = problem.targetFunc.coefs[bj];
-
-        for(size_t j = 0; j < cols; ++j){
-            mat[rows-1][j] -= cB * mat[i][j];
-        }
-    }
-
-
-    while(true){
-        // Входящий столбец
-        double best = 0.0;
-        size_t enter = cols;
-
-        for(size_t j = 0; j < cols - 1; ++j){
-            if(problem.targetFunc.minimaze){
-                if(mat[rows-1][j] < best - EPS){  // для min: ищем < 0
-                    best = mat[rows-1][j];
-                    enter = j;
-                }
-            } else {
-                if(mat[rows-1][j] > best + EPS){  // для max: ищем > 0
-                    best = mat[rows-1][j];
-                    enter = j;
+        for (size_t i = 0; i < nCons; ++i) {
+            double a_ij = mat[i][enterIdx];
+            if (a_ij > EPS) {
+                double ratio = mat[i][cols - 1] / a_ij;
+                // Если mat[i][cols-1] около 0, ratio будет 0.
+                // Это инициирует "смену базиса" (pivot с нулевым шагом) [3, 4].
+                if (ratio < minRatio - EPS) {
+                    minRatio = ratio;
+                    leaveRow = i;
                 }
             }
         }
 
-        if(enter == cols) break; // оптимум
+        if (leaveRow == rows) {
+            throw std::runtime_error("Функция не ограничена снизу [7]");
+        }
 
-        // Симплекс-отношение
-        double minRel = std::numeric_limits<double>::infinity();
-        size_t leave = rows;
-
-        for(size_t i = 0; i < nCons; ++i){
-            if(mat[i][enter] > 0){
-                double r = mat[i][cols-1] / mat[i][enter];
-                if(r < minRel){
-                    minRel = r;
-                    leave = i;
-                }
+        // 3) Pivot (пересчет всей таблицы)
+        basis[leaveRow] = enterIdx;
+        double pivot = mat[leaveRow][enterIdx];
+        for (size_t j = 0; j < cols; ++j) mat[leaveRow][j] /= pivot;
+        for (size_t i = 0; i < rows; ++i) {
+            if (i != leaveRow) {
+                double factor = mat[i][enterIdx];
+                for (size_t j = 0; j < cols; ++j) mat[i][j] -= factor * mat[leaveRow][j];
             }
         }
-
-        if(leave == rows)
-            throw std::runtime_error("Unbounded solution");
-
-        // Pivot
-        double pivot = mat[leave][enter];
-        for(size_t j = 0; j < cols; ++j)
-            mat[leave][j] /= pivot;
-
-        for(size_t i = 0; i < rows; ++i){
-            if(i == leave) continue;
-            double f = mat[i][enter];
-            for(size_t j = 0; j < cols; ++j)
-                mat[i][j] -= f * mat[leave][j];
-        }
-
-        basis[leave] = enter;
     }
-
-
     
+
+    // Вывод результата
+    /*
+    std::cout << "Оптимальное значение: " << mat[rows - 1][cols - 1] << std::endl;
+    for (size_t i = 0; i < nCons; ++i) {
+        std::cout << "x" << basis[i] + 1 << " = " << mat[i][cols - 1] << std::endl;
+    }
+    */
+
+    // Получение решения только для исходных переменных
     std::vector<double> x(nVars, 0.0);
-    for(size_t i = 0; i < nCons; ++i){
-        if(basis[i] < nVars)
-            x[basis[i]] = mat[i][cols-1];
+    for (size_t i = 0; i < nCons; ++i) {
+        if (basis[i] < nVars) {
+            x[basis[i]] = mat[i][cols - 1]; // значение базисной исходной переменной
+        }
     }
 
-    double value = mat[rows-1][cols-1];
-    // Снова учитываем тип задачи
-    if(problem.targetFunc.minimaze)
-        value = -value;
-
-    std::cout << "Результат Симплекс метода:" << std::endl;
-    for(size_t i = 0; i < x.size(); ++i){
-        std::cout << "x" << i+1 << " = " << x[i] << std::endl;
+    /*
+    // Вывод исходных переменных
+    std::cout << "Solution (original variables):\n";
+    for (size_t j = 0; j < nVars; ++j) {
+        std::cout << "x" << (j+1) << " = " << x[j] << "\n";
     }
-    std::string text = problem.targetFunc.minimaze ? "Минимальное " : "Максимальное ";
-    std::cout << text + "значение целевой функции = " << value << std::endl;
+
+    // Вывод значений оставшихся базисных (вспомогательных) переменных
+    std::cout << "Base auxiliary/slack/artificial variables:\n";
+    for (size_t i = 0; i < nCons; ++i) {
+        size_t col = basis[i];
+        if (col >= nVars) {
+            std::cout << "var x" << (col+1) << " (aux) = " << mat[i][cols - 1] << "\n";
+        }
+    }
+    */
+    /*
+    // Проверка ограничений: A*x ?= b (дополнительная печать невязок финального решения)
+    std::cout << "Final constraints residuals (post-solution):\n";
+    for (size_t i = 0; i < nCons; ++i) {
+        double lhs = 0.0;
+        for (size_t j = 0; j < nVars; ++j) lhs += problem.constraints[i].coefs[j] * x[j];
+        double rhs = problem.constraints[i].rhs;
+        double resid = lhs - rhs;
+        std::cout << "Row " << i+1 << ": LHS=" << lhs << " RHS=" << rhs
+                  << " residual=" << std::setprecision(12) << resid << "\n";
+    }
+    */
+
+    // Делаем обратные замены если они есть
+    std::vector<double> real_ans(NofVar, 0.0);
+    for(size_t i = 0; i < NofVar; ++i){
+        real_ans[i] = x[i];
+    }
+    if(!problem.switches.empty()){
+        for(auto& el: problem.switches){
+            real_ans[el.first] = x[el.second.first] - x[el.second.second];
+        }
+    }
+
+    // Вывод оптимальных значений
+    for(size_t i = 0; i < real_ans.size(); ++i){
+        std::cout << "x" << (i+1) << " = " << real_ans[i] << "\n";
+    }
+
+    // Считаем целевую функцию по оригинальным коэффициентам
+    double obj = 0.0;
+    for (size_t j = 0; j < nVars; ++j) obj += problem.targetFunc.coefs[j] * x[j];
+    if (!problem.targetFunc.minimaze) {
+        obj *= -1;
+    }
+    std::cout << "Значание функции цели: " << obj << "\n";
 }

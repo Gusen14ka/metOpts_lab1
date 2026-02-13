@@ -163,7 +163,7 @@ LPproblem LPproblem::get_symetric() const{
     }
     // Записываем замену в словарь для обратной замены
     for(size_t i = 0; i < toSwitch.size(); ++i){
-        problem.switches[toSwitch[i]] = {toSwitch[i], nonnegs.size() - 1 + toSwitch[i]};
+        problem.switches[toSwitch[i]] = {toSwitch[i], nonnegs.size() + i};
     }
     // Делаем замену в ограничениях
     for(auto& el: problem.constraints){
@@ -199,7 +199,7 @@ LPproblem LPproblem::get_canon() const{
     }
     // Записываем замену в словарь для обратной замены
     for(size_t i = 0; i < toSwitch.size(); ++i){
-        problem.switches[toSwitch[i]] = {toSwitch[i], nonnegs.size() - 1 + toSwitch[i]};
+        problem.switches[toSwitch[i]] = {toSwitch[i], nonnegs.size() + i};
     }
     // Делаем замену в ограничениях
     for(auto& el: problem.constraints){
@@ -233,7 +233,7 @@ LPproblem LPproblem::get_canon() const{
     auto itGE = toSwitchGE.begin();
     auto itLE = toSwitchLE.begin();
     while(itGE != toSwitchGE.end() || itLE != toSwitchLE.end()){
-        if((itGE == toSwitchGE.end() &&  itLE != toSwitchLE.end()) || *itGE > *itLE){
+        if(((itGE != toSwitchGE.end() &&  itLE != toSwitchLE.end()) && *itGE > *itLE) || (itLE != toSwitchLE.end())){
             problem.inequals.push_back(*itLE);
             for(size_t i = 0; i < problem.constraints.size(); ++i){
                 if(*itLE == i){

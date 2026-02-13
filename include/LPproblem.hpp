@@ -49,4 +49,5 @@ private:
     static void fixCons(LPproblem& problem);
 
     friend void runSimplex(LPproblem problem);
+    friend void runBruteForce(LPproblem problem);
 };

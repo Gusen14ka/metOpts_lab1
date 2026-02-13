@@ -1,8 +1,11 @@
 #include "LPproblem.hpp"
 #include "Logger.hpp"
 #include "simplex.hpp"
+#include "bruteforce.hpp"
 #include <Windows.h>
+#include <exception>
 #include <iostream>
+#include <ostream>
 
 #define LOG Logger::instance()
 
@@ -13,7 +16,7 @@ int main(){
     LOG.set_log_to_console(true);
     LPproblem problem("data.txt");
     std::cout << "--- 1. Ввод задачи --- \n" << std::endl;
-    //problem.print();
+    problem.print();
 
     std::cout << "\n --- 2. Приведение к остальным формам ---\n" << std::endl;
     std::cout << "Симметрическая" << std::endl;
@@ -22,7 +25,7 @@ int main(){
 
     std::cout << "\nКаноническая" << std::endl;
     auto canonprbl = problem.get_canon();
-    //canonprbl.print();
+    canonprbl.print();
 
     std::cout << "\n --- 3. Двойственные задачи ---\n" << std::endl;
     std::cout << "Двойственная общая" << std::endl;
@@ -37,5 +40,19 @@ int main(){
     auto dualcanonprbl = canonprbl.get_dual();
     //dualcanonprbl.print();
 
-    runSimplex(canonprbl);
+    try{
+        runSimplex(canonprbl);
+    }
+    catch(std::exception& e){
+        std:: cout << "[Ошибка в Симплекс методе]: " << e.what() << std::endl;
+    }
+    
+    std::cout << "\nРешение методом перебора крайних точек\n" << std::endl;
+    
+    try{
+        runBruteForce(canonprbl);
+    }
+    catch(std::exception& e){
+        std:: cout << "[Ошибка в методе перебора крайних точек]: " << e.what() << std::endl;
+    }
 }

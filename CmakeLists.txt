@@ -17,6 +17,7 @@ target_sources(lab1
         src/LPproblem.cpp
         src/problemForm.cpp
         src/simplex.cpp
+        src/bruteforce.cpp
 )
 
 target_include_directories(lab1
