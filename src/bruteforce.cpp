@@ -123,7 +123,7 @@ void runBruteForce(LPproblem problem) {
         // 2. Решаем СЛАУ для базисных переменных
         vector<double> x_basis(m);
         if (solveSLAU(m, B, b_vec, x_basis)) {
-            // 3. Проверка допустимости (x >= 0) [163, Определение 4.3]
+            // 3. Проверка допустимости (x >= 0) 
             bool feasible = true;
             vector<double> currentX(n, 0);
             for (int i = 0; i < m; ++i) {

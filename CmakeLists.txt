@@ -6,27 +6,44 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- Статическая CRT для MSVC (чтобы exe работал на другом ПК без Redistributable)
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# --- создаём исполняемый файл
 add_executable(lab1
     main.cpp
+    src/relations.cpp
+    src/Logger.cpp
+    src/LPproblem.cpp
+    src/problemForm.cpp
+    src/simplex.cpp
+    src/bruteforce.cpp
 )
 
-target_sources(lab1
-    PRIVATE
-        src/relations.cpp
-        src/Logger.cpp
-        src/LPproblem.cpp
-        src/problemForm.cpp
-        src/simplex.cpp
-        src/bruteforce.cpp
-)
-
+# --- include директории
 target_include_directories(lab1
     PRIVATE
         ${CMAKE_SOURCE_DIR}/include
 )
 
-configure_file(
-    ${CMAKE_SOURCE_DIR}/data.txt
-    ${CMAKE_CURRENT_BINARY_DIR}/data.txt
-    COPYONLY
+# --- кладём exe в отдельную папку dist
+set_target_properties(lab1 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/dist
 )
+
+# --- копируем data.txt рядом с exe после сборки
+add_custom_command(TARGET lab1 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/data.txt
+        $<TARGET_FILE_DIR:lab1>
+)
+
+# --- опционально: zip-пакет через CPack
+include(InstallRequiredSystemLibraries)
+install(TARGETS lab1 RUNTIME DESTINATION bin)
+install(FILES ${CMAKE_SOURCE_DIR}/data.txt DESTINATION bin)
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_PACKAGE_NAME "lab1")
+include(CPack)

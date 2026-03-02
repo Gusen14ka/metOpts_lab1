@@ -67,18 +67,18 @@ void runSimplex(LPproblem problem){
     auto printTable = [&](int iter){
         std::cout << "=== Phase I iter " << iter << " ===\n";
         std::cout << std::setw(6) << "bas";
-        for (size_t j = 0; j < cols - 1; ++j) std::cout << std::setw(8) << ("x" + std::to_string(j+1));
-        std::cout << std::setw(10) << "RHS" << std::setw(12) << "resid\n";
+        for (size_t j = 0; j < cols - 1; ++j) std::cout << ' ' << std::setw(10) << ("x" + std::to_string(j+1));
+        std::cout << ' ' << std::setw(12) << "RHS\n"; //<< std::setw(12) << "resid\n";
 
         // Печатаем таблицу (включая RHS)
         for (size_t i = 0; i < nCons; ++i) {
             std::cout << std::setw(6) << ("x" + std::to_string(basis[i]+1));
-            for (size_t j = 0; j < cols; ++j) std::cout << std::setw(8) << std::setprecision(6) << mat[i][j];
+            for (size_t j = 0; j < cols; ++j) std::cout << ' ' << std::setw(12) << std::setprecision(6) << mat[i][j];
             // временно оставим перенос строки, невязку посчитаем ниже
             std::cout << "\n";
         }
         std::cout << std::setw(6) << "Δ";
-        for (size_t j = 0; j < cols; ++j) std::cout << std::setw(8) << std::setprecision(6) << mat[rows-1][j];
+        for (size_t j = 0; j < cols; ++j) std::cout << ' ' << std::setw(12) << std::setprecision(6) << mat[rows-1][j];
         std::cout << "\n";
 
         // --- Вычислим текущий базисный вектор x (для исходных nVars переменных) ---
@@ -214,6 +214,7 @@ void runSimplex(LPproblem problem){
                     break;
                 }
             }
+            
             // Если replaced == false, значит строка i полностью нулевая для реальных переменных.
             // Согласно [2], это означает, что данное ограничение является лишним (линейно зависимым).
         }
